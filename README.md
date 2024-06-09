@@ -29,7 +29,7 @@ Now, only superusers can run DDL commands.
 ```sql
 CREATE TABLE foo (id serial);
 ERROR:  Non-superusers are not allowed to execute DDL statements
-CONTEXT:  PL/pgSQL function ddl_guard_check() line 4 at RAISE
+HINT:  ddl_guard.enabled is set.
 ```
 
 For a full list of DDL commands that are blocked, see `ddl_command_start` in https://www.postgresql.org/docs/current/event-trigger-matrix.html.
