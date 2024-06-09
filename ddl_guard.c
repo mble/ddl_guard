@@ -11,8 +11,7 @@ void _PG_fini(void);
 
 static bool ddl_guard_enabled = false;
 
-void
-_PG_init(void)
+void _PG_init(void)
 {
     DefineCustomBoolVariable(
         "ddl_guard.enabled",
@@ -24,12 +23,10 @@ _PG_init(void)
         0,
         NULL,
         NULL,
-        NULL
-    );
+        NULL);
 }
 
-void
-_PG_fini(void)
+void _PG_fini(void)
 {
     /* Nothing to cleanup */
 }
