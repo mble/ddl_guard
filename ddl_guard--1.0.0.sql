@@ -4,10 +4,8 @@ RETURNS event_trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    IF current_setting('ddl_guard.enabled', true) = 'on' THEN
-        IF NOT current_setting('is_superuser', true) = 'on' THEN
-            RAISE EXCEPTION 'Non-superusers are not allowed to execute DDL statements';
-        END IF;
+    IF (current_setting('ddl_guard.enabled', true) = 'on') AND (NOT current_setting('is_superuser', true) = 'on') THEN
+        RAISE EXCEPTION 'Non-superusers are not allowed to execute DDL statements';
     END IF;
 END;
 $$;
