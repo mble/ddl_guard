@@ -3,9 +3,10 @@ MODULES = ddl_guard
 EXTENSION = ddl_guard
 DATA = ddl_guard--1.0.0.sql
 
-TESTS = $(wildcard test/sql/*.sql)
-REGRESS = $(patsubst test/sql/%.sql,%,$(TESTS))
-REGRESS_OPTS = --inputdir=test --load-extension=$(EXTENSION) --temp-config=test/ddl_guard.conf --use-existing
+INPUTDIR ?= test/regular
+TESTS = $(wildcard $(INPUTDIR)/sql/*.sql)
+REGRESS = $(patsubst $(INPUTDIR)/sql/%.sql,%,$(TESTS))
+REGRESS_OPTS = --inputdir=$(INPUTDIR) --load-extension=$(EXTENSION) --temp-config=test/ddl_guard.conf --use-existing
 
 OPTFLAGS = -march=native
 ifeq ($(shell uname -s), Darwin)

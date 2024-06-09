@@ -10,10 +10,10 @@ SELECT current_setting('is_superuser', true) = 'on' AS is_superuser;
  f
 (1 row)
 
-CREATE TABLE foobar (id serial PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS foobar (id serial PRIMARY KEY);
 ERROR:  Non-superusers are not allowed to execute DDL statements
 CONTEXT:  PL/pgSQL function ddl_guard_check() line 4 at RAISE
-CREATE FUNCTION foobar_trigger() RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION foobar_trigger() RETURNS TRIGGER AS $$
 BEGIN
     RETURN NEW;
 END;

@@ -35,5 +35,7 @@ jobs:
         run: |
           sudo systemctl status postgresql@${{ matrix.pg-version }}-main
           sudo journalctl -xeu  postgresql@${{ matrix.pg-version }}-main
-      - id: test
+      - id: test-regular
         run: bin/test
+      - id: test-superuser
+        run: TEST_USER="$USER" INPUTDIR="test/superuser" bin/test

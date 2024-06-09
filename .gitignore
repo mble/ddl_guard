@@ -34,7 +34,7 @@
 # Executables
 *.exe
 *.out
-!test/expected/*.out
+!test/**/*.out
 *.app
 *.i*86
 *.x86_64

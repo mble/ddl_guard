@@ -1,0 +1,20 @@
+SELECT current_setting('ddl_guard.enabled', true) = 'on' AS ddl_guard_enabled;
+ ddl_guard_enabled 
+-------------------
+ t
+(1 row)
+
+SELECT current_setting('is_superuser', true) = 'on' AS is_superuser;
+ is_superuser 
+--------------
+ t
+(1 row)
+
+CREATE TABLE IF NOT EXISTS foobar (id serial PRIMARY KEY);
+CREATE OR REPLACE FUNCTION foobar_trigger() RETURNS TRIGGER AS $$
+BEGIN
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TABLE IF EXISTS foobar;
+DROP FUNCTION IF EXISTS foobar_trigger;

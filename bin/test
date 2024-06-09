@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 TEST_USER=${TEST_USER:-testuser}
+INPUTDIR=${INPUTDIR:-test/regular}
 
 make clean
 PG_CFLAGS="-DUSE_ASSERT_CHECKING -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare" make
@@ -11,7 +12,7 @@ createdb contrib_regression
 psql -d contrib_regression -c 'CREATE EXTENSION ddl_guard;' > /dev/null
 psql -d contrib_regression -c 'ALTER SYSTEM SET ddl_guard.enabled = on;' > /dev/null
 psql -d contrib_regression -c 'SELECT pg_reload_conf();' > /dev/null
-PGUSER="${TEST_USER}" make installcheck
+PGUSER="${TEST_USER}" INPUTDIR="${INPUTDIR}" make installcheck 
 
 if [ $? -ne 0 ]; then
     echo "Regression tests failed"
