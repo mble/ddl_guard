@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+TEST_USER=${TEST_USER:-testuser}
+
+make clean
+PG_CFLAGS="-DUSE_ASSERT_CHECKING -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare" make
+dropuser --if-exists "${TEST_USER}"
+dropdb --if-exists contrib_regression
+createuser testuser
+createdb contrib_regression
+psql -d contrib_regression -c 'CREATE EXTENSION ddl_guard;' > /dev/null
+psql -d contrib_regression -c 'ALTER SYSTEM SET ddl_guard.enabled = on;' > /dev/null
+psql -d contrib_regression -c 'SELECT pg_reload_conf();' > /dev/null
+PGUSER="${TEST_USER}" make installcheck
+
+if [ $? -ne 0 ]; then
+    echo "Regression tests failed"
+    cat regression.diffs
+    exit 1
+fi

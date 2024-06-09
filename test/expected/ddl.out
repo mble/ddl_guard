@@ -1,0 +1,15 @@
+SELECT current_setting('ddl_guard.enabled', true) = 'on' AS ddl_guard_enabled;
+ ddl_guard_enabled 
+-------------------
+ t
+(1 row)
+
+SELECT current_setting('is_superuser', true) = 'on' AS is_superuser;
+ is_superuser 
+--------------
+ f
+(1 row)
+
+CREATE TABLE foobar (id serial PRIMARY KEY);
+ERROR:  Non-superusers are not allowed to execute DDL statements
+CONTEXT:  PL/pgSQL function ddl_guard_check() line 4 at RAISE
