@@ -9,7 +9,7 @@ dropuser --if-exists "${TEST_USER}"
 dropdb --if-exists contrib_regression
 createuser testuser
 createdb contrib_regression
-psql -d contrib_regression -c 'CREATE EXTENSION ddl_guard;' > /dev/null
+psql -d contrib_regression -c 'CREATE EXTENSION ddl_guard SCHEMA pg_catalog;' > /dev/null
 psql -d contrib_regression -c 'ALTER SYSTEM SET ddl_guard.enabled = on;' > /dev/null
 psql -d contrib_regression -c 'SELECT pg_reload_conf();' > /dev/null
 PGUSER="${TEST_USER}" INPUTDIR="${INPUTDIR}" make installcheck 

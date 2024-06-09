@@ -12,11 +12,16 @@ SELECT current_setting('is_superuser', true) = 'on' AS is_superuser;
 
 CREATE TABLE IF NOT EXISTS foobar (id serial PRIMARY KEY);
 ERROR:  Non-superusers are not allowed to execute DDL statements
-CONTEXT:  PL/pgSQL function ddl_guard_check() line 4 at RAISE
+HINT:  ddl_guard.enabled is set.
 CREATE OR REPLACE FUNCTION foobar_trigger() RETURNS TRIGGER AS $$
 BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 ERROR:  Non-superusers are not allowed to execute DDL statements
-CONTEXT:  PL/pgSQL function ddl_guard_check() line 4 at RAISE
+HINT:  ddl_guard.enabled is set.
+DROP EXTENSION ddl_guard;
+ERROR:  Non-superusers are not allowed to execute DDL statements
+HINT:  ddl_guard.enabled is set.
+SET ddl_guard.enabled TO off;
+ERROR:  permission denied to set parameter "ddl_guard.enabled"

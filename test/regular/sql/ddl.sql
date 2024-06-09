@@ -6,3 +6,5 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+DROP EXTENSION ddl_guard;
+SET ddl_guard.enabled TO off;

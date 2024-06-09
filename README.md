@@ -20,7 +20,7 @@ shared_preload_libraries = 'ddl_guard'
 Then restart your PostgreSQL server.
 
 ```sql
-CREATE EXTENSION ddl_guard;
+CREATE EXTENSION ddl_guard SCHEMA pg_catalog;
 ALTER SYSTEM SET ddl_guard.enabled = on;
 ```
 
