@@ -1,0 +1,4 @@
+# ddl_guard.control
+default_version = '1.0.0'
+comment = 'DDL Guard: Prevents DDL execution by non-superusers when a specific GUC is set'
+relocatable = false
