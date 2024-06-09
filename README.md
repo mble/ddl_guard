@@ -32,6 +32,8 @@ ERROR:  Non-superusers are not allowed to execute DDL statements
 CONTEXT:  PL/pgSQL function ddl_guard_check() line 4 at RAISE
 ```
 
+For a full list of DDL commands that are blocked, see `ddl_command_start` in https://www.postgresql.org/docs/current/event-trigger-matrix.html.
+
 ## License
 
 PostgreSQL License
