@@ -16,7 +16,7 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
-PG_CFLAGS += $(OPTFLAGS) -ftree-vectorize -fassociative-math -fno-signed-zeros -fno-trapping-math
+PG_CFLAGS += $(OPTFLAGS) -Werror -ftree-vectorize -fassociative-math -fno-signed-zeros -fno-trapping-math
 
 PG_CONFIG ?= pg_config
 PGXS := $(shell $(PG_CONFIG) --pgxs)
