@@ -34,6 +34,29 @@ HINT:  ddl_guard.enabled is set.
 
 For a full list of DDL commands that are blocked, see `ddl_command_start` in https://www.postgresql.org/docs/current/event-trigger-matrix.html.
 
+## Sentinel Mode
+
+In some cases, instead of blocking DDL, dropping a sentinel file to indicate DDL has been ran is enough. This can be enabled by setting `ddl_guard.ddl_sentinel` to `on`.
+
+```sql
+ALTER SYSTEM SET ddl_guard.ddl_sentinel = on;
+```
+
+Now, instead of blocking, a warning is emitted and a sentinel file is dropped as `$PGDATA/pg_stat_tmp/ddl_guddl_guard_ddl_sentinel`:
+
+```sql
+CREATE TABLE foo (id serial);
+WARNING:  ddl_guard: ddl detected, sentinel file written
+CREATE TABLE
+```
+
+## Configuration
+
+The following configuration options are available:
+
+- `ddl_guard.enabled`: Enables or disables the extension. Default is `off`.
+- `ddl_guard.ddl_sentinel`: Enables "sentinel mode" for DDL. Default is `off`.
+
 ## License
 
 PostgreSQL License
