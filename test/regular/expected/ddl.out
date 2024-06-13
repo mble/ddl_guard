@@ -11,17 +11,14 @@ SELECT current_setting('is_superuser', true) = 'on' AS is_superuser;
 (1 row)
 
 CREATE TABLE IF NOT EXISTS foobar (id serial PRIMARY KEY);
-ERROR:  Non-superusers are not allowed to execute DDL statements
-HINT:  ddl_guard.enabled is set.
+WARNING:  ddl_guard: ddl detected, sentinel file written
 CREATE OR REPLACE FUNCTION foobar_trigger() RETURNS TRIGGER AS $$
 BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-ERROR:  Non-superusers are not allowed to execute DDL statements
-HINT:  ddl_guard.enabled is set.
-DROP EXTENSION ddl_guard;
-ERROR:  Non-superusers are not allowed to execute DDL statements
-HINT:  ddl_guard.enabled is set.
-SET ddl_guard.enabled TO off;
-ERROR:  permission denied to set parameter "ddl_guard.enabled"
+WARNING:  ddl_guard: ddl detected, sentinel file written
+DROP TABLE IF EXISTS foobar;
+WARNING:  ddl_guard: ddl detected, sentinel file written
+DROP FUNCTION IF EXISTS foobar_trigger;
+WARNING:  ddl_guard: ddl detected, sentinel file written

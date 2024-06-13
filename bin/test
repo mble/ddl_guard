@@ -12,6 +12,8 @@ createdb contrib_regression
 psql -d contrib_regression -c "GRANT ALL ON SCHEMA public TO ${TEST_USER}"
 psql -d contrib_regression -c 'CREATE EXTENSION ddl_guard SCHEMA pg_catalog;' > /dev/null
 psql -d contrib_regression -c 'ALTER SYSTEM SET ddl_guard.enabled = on;' > /dev/null
+psql -d contrib_regression -c 'ALTER SYSTEM SET ddl_guard.ddl_sentinel = on;' > /dev/null
+psql -d contrib_regression -c 'ALTER SYSTEM SET ddl_guard.lo_sentinel = on;' > /dev/null
 psql -d contrib_regression -c 'SELECT pg_reload_conf();' > /dev/null
 PGUSER="${TEST_USER}" INPUTDIR="${INPUTDIR}" make installcheck
 
