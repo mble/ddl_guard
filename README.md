@@ -42,12 +42,30 @@ In some cases, instead of blocking DDL, dropping a sentinel file to indicate DDL
 ALTER SYSTEM SET ddl_guard.ddl_sentinel = on;
 ```
 
-Now, instead of blocking, a warning is emitted and a sentinel file is dropped as `$PGDATA/pg_stat_tmp/ddl_guddl_guard_ddl_sentinel`:
+Now, instead of blocking, a warning is emitted and a sentinel file is dropped as `$PGDATA/pg_stat_tmp/ddl_guard_ddl_sentinel`:
 
 ```sql
 CREATE TABLE foo (id serial);
 WARNING:  ddl_guard: ddl detected, sentinel file written
 CREATE TABLE
+```
+
+This can also be used in conjunction with `ddl_guard.lo_sentinel` to drop a sentinel file for large objects.
+
+```sql
+ALTER SYSTEM SET ddl_guard.lo_sentinel = on;
+```
+
+Now, instead of blocking, a warning is emitted and a sentinel file is dropped as `$PGDATA/pg_stat_tmp/ddl_guard_lo_sentinel`:
+
+```sql
+SELECT lo_create(0);
+WARNING:  lo_guard: lobject write function call, sentinel file written
+WARNING:  lo_guard: pg_largeobject creation detected, sentinel file written
+ lo_create
+-----------
+     51058
+(1 row)
 ```
 
 ## Configuration
@@ -56,6 +74,7 @@ The following configuration options are available:
 
 - `ddl_guard.enabled`: Enables or disables the extension. Default is `off`.
 - `ddl_guard.ddl_sentinel`: Enables "sentinel mode" for DDL. Default is `off`.
+- `ddl_guard.lo_sentinel`: Enables "sentinel mode" for large objects. Default is `off`.
 
 ## License
 

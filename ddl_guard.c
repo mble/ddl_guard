@@ -30,6 +30,7 @@ static bool ddl_guard_ddl_sentinel = false;
 static bool ddl_guard_lo_sentinel = false;
 static object_access_hook_type next_object_access_hook = NULL;
 
+/* large_object_funcs contains all the create/update/destroy lobject funcs */
 static const char *large_object_funcs[] = {
 	"lo_create",
 	"lo_creat",
@@ -144,29 +145,13 @@ lob_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId, int s
 								if ((entry = fmgr_lookupByName(large_object_funcs[i])) != NULL)
 								{
 									write_sentinel_file(LO_SENTINEL_FILE);
-									ereport(WARNING, errmsg("lo_guard: lobject write function call, sentinel file written"));
+									ereport(WARNING, errmsg("lo_guard: lobject \"%s\" function call, sentinel file written", entry->funcName));
 								}
 							}
 						}
 					}
 				default:
 					break;
-			}
-			if (classId == LargeObjectRelationId)
-			{
-				switch (access)
-				{
-					case OAT_POST_CREATE:
-						write_sentinel_file(LO_SENTINEL_FILE);
-						ereport(WARNING, (errmsg("ddl_guard: pg_largeobject creation detected, sentinel file written")));
-						break;
-					case OAT_DROP:
-						write_sentinel_file(LO_SENTINEL_FILE);
-						ereport(WARNING, (errmsg("ddl_guard: pg_largeobject deletion detected, sentinel file written")));
-						break;
-					default:
-						break;
-				}
 			}
 		}
 	}
