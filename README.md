@@ -60,8 +60,7 @@ Now, instead of blocking, a warning is emitted and a sentinel file is dropped as
 
 ```sql
 SELECT lo_create(0);
-WARNING:  lo_guard: lobject write function call, sentinel file written
-WARNING:  lo_guard: pg_largeobject creation detected, sentinel file written
+WARNING:  lo_guard: lobject "be_lo_create" function call, sentinel file written
  lo_create
 -----------
      51058
