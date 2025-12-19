@@ -8,11 +8,13 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_largeobject.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_language.h"
 #include "catalog/pg_proc.h"
 #include "executor/spi.h"
 #include "utils/builtins.h"
 #include "utils/catcache.h"
 #include "utils/lsyscache.h"
+#include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "tcop/utility.h"
 
@@ -63,20 +65,22 @@ static int	lobject_funcs_cap = 0;
 PG_FUNCTION_INFO_V1(ddl_guard_check);
 
 static void
-add_lobject_func(Oid funcid, char *log_name)
+add_lobject_func(Oid funcid, const char *log_name)
 {
 	int			i;
+	MemoryContext	oldcxt;
 
 	for (i = 0; i < lobject_funcs_count; i++)
 	{
 		if (lobject_funcs[i].oid == funcid)
 		{
 			if (log_name != NULL)
-				pfree(log_name);
+				pfree((void *) log_name);
 			return;
 		}
 	}
 
+	oldcxt = MemoryContextSwitchTo(TopMemoryContext);
 	if (lobject_funcs_cap == 0)
 	{
 		lobject_funcs_cap = 16;
@@ -89,8 +93,12 @@ add_lobject_func(Oid funcid, char *log_name)
 	}
 
 	lobject_funcs[lobject_funcs_count].oid = funcid;
-	lobject_funcs[lobject_funcs_count].log_name = log_name;
+	lobject_funcs[lobject_funcs_count].log_name = (log_name != NULL) ? pstrdup(log_name) : NULL;
 	lobject_funcs_count++;
+	MemoryContextSwitchTo(oldcxt);
+
+	if (log_name != NULL)
+		pfree((void *) log_name);
 }
 
 static bool
@@ -123,6 +131,8 @@ set_lobject_funcs(void)
 			procform = (Form_pg_proc) GETSTRUCT(tuple);
 
 			if (procform->pronamespace != nspoid)
+				continue;
+			if (procform->prolang != INTERNALlanguageId && procform->prolang != ClanguageId)
 				continue;
 
 			prosrc_datum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prosrc, &isnull);
@@ -265,7 +275,8 @@ lob_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId, int s
 		if (!lobject_funcs_initialized && IsTransactionState())
 		{
 			lobject_funcs_ready = set_lobject_funcs();
-			lobject_funcs_initialized = true;
+			if (lobject_funcs_ready)
+				lobject_funcs_initialized = true;
 		}
 		if (!lobject_funcs_ready)
 			goto done;
