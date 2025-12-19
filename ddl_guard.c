@@ -1,27 +1,23 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "utils/fmgrtab.h"
-#include "storage/fd.h"
 #include "utils/guc.h"
 #include "commands/event_trigger.h"
 #include "miscadmin.h"
-#include "pgstat.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_largeobject.h"
+#include "executor/spi.h"
+#include "utils/builtins.h"
+#include "tcop/utility.h"
 
-#include <stdio.h>
-#include <unistd.h>
 
 #ifdef PG_MODULE_MAGIC
 PG_MODULE_MAGIC;
 #endif
 
-#define DDL_SENTINEL_FILE PG_STAT_TMP_DIR "/ddl_guard_ddl_sentinel"
-#define LO_SENTINEL_FILE PG_STAT_TMP_DIR "/ddl_guard_lo_sentinel"
-
 void		_PG_init(void);
 void		_PG_fini(void);
-void		write_sentinel_file(const char *filename);
+void		log_sentinel_event(const char *operation);
 Datum		ddl_guard_check(PG_FUNCTION_ARGS);
 static void lob_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId, int subId, void *arg);
 
@@ -74,20 +70,38 @@ fmgr_lookupByName(const char *name)
 }
 
 void
-write_sentinel_file(const char *filename)
+log_sentinel_event(const char *operation)
 {
-	FILE	   *fp = NULL;
+	int			ret;
+	Oid			argtypes[1];
+	Datum		values[1];
+	char		nulls[1];
+	const char *op = operation;
 
-	fp = AllocateFile(filename, "w");
-	if (fp == NULL)
+	if (op == NULL || op[0] == '\0')
+		op = "unknown";
+
+	if (SPI_connect() != SPI_OK_CONNECT)
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("could not create sentinel file \"%s\": %m", filename)));
+				 errmsg("could not connect to SPI")));
 
-	if (FreeFile(fp))
+	argtypes[0] = TEXTOID;
+	values[0] = CStringGetTextDatum(op);
+	nulls[0] = ' ';
+
+	ret = SPI_execute_with_args(
+		"INSERT INTO ddl_guard.sentinel_log (operation) VALUES ($1)",
+		1, argtypes, values, nulls, false, 0);
+	if (ret != SPI_OK_INSERT)
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("could not write sentinel file \"%s\": %m", filename)));
+				 errmsg("could not insert ddl_guard sentinel log entry")));
+
+	if (SPI_finish() != SPI_OK_FINISH)
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("could not close SPI connection")));
 }
 
 static bool
@@ -144,8 +158,8 @@ lob_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId, int s
 								/* ooh that's a bingo! */
 								if ((entry = fmgr_lookupByName(large_object_funcs[i])) != NULL)
 								{
-									write_sentinel_file(LO_SENTINEL_FILE);
-									ereport(WARNING, errmsg("lo_guard: lobject \"%s\" function call, sentinel file written", entry->funcName));
+									log_sentinel_event(entry->funcName);
+									ereport(WARNING, errmsg("lo_guard: lobject \"%s\" function call, sentinel entry written", entry->funcName));
 								}
 							}
 						}
@@ -171,8 +185,10 @@ ddl_guard_check(PG_FUNCTION_ARGS)
 	{
 		if (ddl_guard_ddl_sentinel)
 		{
-			write_sentinel_file(DDL_SENTINEL_FILE);
-			ereport(WARNING, (errmsg("ddl_guard: ddl detected, sentinel file written")));
+			EventTriggerData *trigdata = (EventTriggerData *) fcinfo->context;
+
+			log_sentinel_event(GetCommandTagName(trigdata->tag));
+			ereport(WARNING, (errmsg("ddl_guard: ddl detected, sentinel entry written")));
 			PG_RETURN_VOID();
 		}
 		ereport(ERROR,
@@ -191,16 +207,13 @@ _PG_init(void)
 							 NULL, &ddl_guard_enabled, false, PGC_SUSET, 0, NULL,
 							 NULL, NULL);
 
-	DefineCustomBoolVariable("ddl_guard.ddl_sentinel", "Write sentinel file for DDL statements",
+	DefineCustomBoolVariable("ddl_guard.ddl_sentinel", "Write sentinel entry for DDL statements",
 							 NULL, &ddl_guard_ddl_sentinel, false, PGC_SUSET, 0, NULL,
 							 NULL, NULL);
 
-	DefineCustomBoolVariable("ddl_guard.lo_sentinel", "Write sentinel file for pg_largeobject modifications",
+	DefineCustomBoolVariable("ddl_guard.lo_sentinel", "Write sentinel entry for pg_largeobject modifications",
 							 NULL, &ddl_guard_lo_sentinel, false, PGC_SUSET, 0, NULL,
 							 NULL, NULL);
-
-	unlink(DDL_SENTINEL_FILE);
-	unlink(LO_SENTINEL_FILE);
 
 	if (set_lobject_func_oids())
 	{

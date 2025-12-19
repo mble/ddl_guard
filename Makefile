@@ -1,7 +1,7 @@
 # Makefile
 MODULES = ddl_guard
 EXTENSION = ddl_guard
-DATA = ddl_guard--1.0.0.sql
+DATA = ddl_guard--1.0.1.sql
 
 INPUTDIR ?= test/regular
 TESTS = $(wildcard $(INPUTDIR)/sql/*.sql)

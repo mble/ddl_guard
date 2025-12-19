@@ -11,14 +11,14 @@ SELECT current_setting('is_superuser', true) = 'on' AS is_superuser;
 (1 row)
 
 CREATE TABLE IF NOT EXISTS foobar (id serial PRIMARY KEY);
-WARNING:  ddl_guard: ddl detected, sentinel file written
+WARNING:  ddl_guard: ddl detected, sentinel entry written
 CREATE OR REPLACE FUNCTION foobar_trigger() RETURNS TRIGGER AS $$
 BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-WARNING:  ddl_guard: ddl detected, sentinel file written
+WARNING:  ddl_guard: ddl detected, sentinel entry written
 DROP TABLE IF EXISTS foobar;
-WARNING:  ddl_guard: ddl detected, sentinel file written
+WARNING:  ddl_guard: ddl detected, sentinel entry written
 DROP FUNCTION IF EXISTS foobar_trigger;
-WARNING:  ddl_guard: ddl detected, sentinel file written
+WARNING:  ddl_guard: ddl detected, sentinel entry written
