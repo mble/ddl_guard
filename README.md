@@ -9,6 +9,22 @@ make
 make install
 ```
 
+## Docker Tests
+
+Build the test image and run the full regression suite in a container:
+
+```bash
+docker build -t ddl_guard-tests -f docker/Dockerfile .
+docker run --rm ddl_guard-tests
+```
+
+To test local changes without installing PostgreSQL on the host, bind-mount the repo:
+
+```bash
+docker build -t ddl_guard-tests -f docker/Dockerfile .
+docker run --rm -v "$PWD":/workspace ddl_guard-tests
+```
+
 ## Usage
 
 Add as a `shared_preload_library` in your `postgresql.conf`:
