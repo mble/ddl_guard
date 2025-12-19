@@ -36,9 +36,11 @@ shared_preload_libraries = 'ddl_guard'
 Then restart your PostgreSQL server.
 
 ```sql
-CREATE EXTENSION ddl_guard SCHEMA pg_catalog;
+CREATE EXTENSION ddl_guard;
 ALTER SYSTEM SET ddl_guard.enabled = on;
 ```
+
+Note: `ddl_guard` creates the `ddl_guard` schema; ensure it does not already exist before running `CREATE EXTENSION`.
 
 Now, only superusers can run DDL commands.
 
@@ -72,7 +74,7 @@ This can also be used in conjunction with `ddl_guard.lo_sentinel` to log large o
 ALTER SYSTEM SET ddl_guard.lo_sentinel = on;
 ```
 
-Now, instead of blocking, a warning is emitted and a sentinel entry is written to `ddl_guard.sentinel_log`:
+Now, instead of blocking, a warning is emitted and a sentinel entry is written to `ddl_guard.sentinel_log` (readable by all users):
 
 ```sql
 SELECT lo_create(0);

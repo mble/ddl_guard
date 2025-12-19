@@ -1,13 +1,19 @@
 #include "postgres.h"
 #include "fmgr.h"
-#include "utils/fmgrtab.h"
 #include "utils/guc.h"
 #include "commands/event_trigger.h"
 #include "miscadmin.h"
+#include "access/xact.h"
+#include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_largeobject.h"
+#include "catalog/pg_class.h"
+#include "catalog/pg_proc.h"
 #include "executor/spi.h"
 #include "utils/builtins.h"
+#include "utils/catcache.h"
+#include "utils/lsyscache.h"
+#include "utils/syscache.h"
 #include "tcop/utility.h"
 
 
@@ -17,17 +23,28 @@ PG_MODULE_MAGIC;
 
 void		_PG_init(void);
 void		_PG_fini(void);
-void		log_sentinel_event(const char *operation);
+void		log_sentinel_event(const char *volatile operation);
 Datum		ddl_guard_check(PG_FUNCTION_ARGS);
 static void lob_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId, int subId, void *arg);
+static bool set_lobject_funcs(void);
+static const char *lookup_lobject_log_name(Oid funcid);
+static Oid get_sentinel_log_owner(void);
 
 static bool ddl_guard_enabled = false;
 static bool ddl_guard_ddl_sentinel = false;
 static bool ddl_guard_lo_sentinel = false;
 static object_access_hook_type next_object_access_hook = NULL;
+static bool lobject_funcs_initialized = false;
+static bool lobject_funcs_ready = false;
 
-/* large_object_funcs contains all the create/update/destroy lobject funcs */
-static const char *large_object_funcs[] = {
+typedef struct LobjectFuncEntry
+{
+	Oid			oid;
+	char	   *log_name;
+} LobjectFuncEntry;
+
+/* large_object_func_names contains all the SQL lobject functions */
+static const char *large_object_func_names[] = {
 	"lo_create",
 	"lo_creat",
 	"lo_truncate",
@@ -35,140 +52,243 @@ static const char *large_object_funcs[] = {
 	"lo_unlink",
 	"lowrite",
 	"lo_from_bytea",
-	"be_lowrite",
-	"be_lo_create",
-	"be_lo_creat",
-	"be_lo_unlink",
-	"be_lo_truncate",
-	"be_lo_from_bytea",
-	"be_lo_truncate64",
-	"be_lo_import",
-	"be_lo_import_with_oid",
+	"lo_import",
+	"lo_import_with_oid",
 };
-static const int lobject_funcs_count = sizeof(large_object_funcs) / sizeof(large_object_funcs[0]);
-static Oid *lobject_func_oids;
-static int	max_reserved_oid = 0;
-static int	min_reserved_oid = 9000;
+static const int large_object_func_names_count = sizeof(large_object_func_names) / sizeof(large_object_func_names[0]);
+static LobjectFuncEntry *lobject_funcs = NULL;
+static int	lobject_funcs_count = 0;
+static int	lobject_funcs_cap = 0;
 
 PG_FUNCTION_INFO_V1(ddl_guard_check);
 
-/* regards, tom lane */
-static const FmgrBuiltin *
-fmgr_lookupByName(const char *name)
+static void
+add_lobject_func(Oid funcid, char *log_name)
 {
 	int			i;
 
-	for (i = 0; i < fmgr_nbuiltins; i++)
+	for (i = 0; i < lobject_funcs_count; i++)
 	{
-		/* switched to strncmp */
-		/* current max len is 22 in large_object_funcs */
-		if (strncmp(name, fmgr_builtins[i].funcName, 22) == 0)
-			return fmgr_builtins + i;
+		if (lobject_funcs[i].oid == funcid)
+		{
+			if (log_name != NULL)
+				pfree(log_name);
+			return;
+		}
+	}
+
+	if (lobject_funcs_cap == 0)
+	{
+		lobject_funcs_cap = 16;
+		lobject_funcs = (LobjectFuncEntry *) palloc0(lobject_funcs_cap * sizeof(LobjectFuncEntry));
+	}
+	else if (lobject_funcs_count == lobject_funcs_cap)
+	{
+		lobject_funcs_cap *= 2;
+		lobject_funcs = (LobjectFuncEntry *) repalloc(lobject_funcs, lobject_funcs_cap * sizeof(LobjectFuncEntry));
+	}
+
+	lobject_funcs[lobject_funcs_count].oid = funcid;
+	lobject_funcs[lobject_funcs_count].log_name = log_name;
+	lobject_funcs_count++;
+}
+
+static bool
+set_lobject_funcs(void)
+{
+	int			i;
+	Oid			nspoid;
+
+	nspoid = get_namespace_oid("pg_catalog", true);
+	if (!OidIsValid(nspoid))
+		return false;
+
+	for (i = 0; i < large_object_func_names_count; i++)
+	{
+		CatCList   *catlist;
+		int			j;
+
+		catlist = SearchSysCacheList1(PROCNAMEARGSNSP,
+									  CStringGetDatum(large_object_func_names[i]));
+		for (j = 0; j < catlist->n_members; j++)
+		{
+			HeapTuple	tuple;
+			Form_pg_proc procform;
+			Datum		prosrc_datum;
+			bool		isnull;
+			char	   *log_name;
+			Oid			funcid;
+
+			tuple = &catlist->members[j]->tuple;
+			procform = (Form_pg_proc) GETSTRUCT(tuple);
+
+			if (procform->pronamespace != nspoid)
+				continue;
+
+			prosrc_datum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_prosrc, &isnull);
+			if (isnull)
+				continue;
+
+			log_name = TextDatumGetCString(prosrc_datum);
+			funcid = procform->oid;
+			add_lobject_func(funcid, log_name);
+		}
+		ReleaseSysCacheList(catlist);
+	}
+
+	return lobject_funcs_count > 0;
+}
+
+static const char *
+lookup_lobject_log_name(Oid funcid)
+{
+	int			i;
+
+	for (i = 0; i < lobject_funcs_count; i++)
+	{
+		if (lobject_funcs[i].oid == funcid)
+			return lobject_funcs[i].log_name;
 	}
 
 	return NULL;
 }
 
+static Oid
+get_sentinel_log_owner(void)
+{
+	HeapTuple	tuple;
+	Datum		relowner_datum;
+	bool		isnull;
+	Oid			nspoid;
+	Oid			relid;
+	Oid			relowner;
+
+	nspoid = get_namespace_oid("ddl_guard", true);
+	if (!OidIsValid(nspoid))
+		return InvalidOid;
+
+	relid = get_relname_relid("sentinel_log", nspoid);
+	if (!OidIsValid(relid))
+		return InvalidOid;
+
+	tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+	if (!HeapTupleIsValid(tuple))
+		return InvalidOid;
+
+	relowner_datum = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_relowner, &isnull);
+	if (isnull)
+	{
+		ReleaseSysCache(tuple);
+		return InvalidOid;
+	}
+
+	relowner = DatumGetObjectId(relowner_datum);
+	ReleaseSysCache(tuple);
+
+	return relowner;
+}
+
 void
-log_sentinel_event(const char *operation)
+log_sentinel_event(const char *volatile operation)
 {
 	int			ret;
 	Oid			argtypes[1];
 	Datum		values[1];
 	char		nulls[1];
-	const char *op = operation;
+	Oid			log_owner;
+	Oid			saved_userid;
+	int			saved_sec_context;
+	int			new_sec_context;
+	volatile bool	connected = false;
 
-	if (op == NULL || op[0] == '\0')
-		op = "unknown";
-
-	if (SPI_connect() != SPI_OK_CONNECT)
+	log_owner = get_sentinel_log_owner();
+	if (!OidIsValid(log_owner))
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("could not connect to SPI")));
+				 errmsg("ddl_guard.sentinel_log not found")));
 
-	argtypes[0] = TEXTOID;
-	values[0] = CStringGetTextDatum(op);
-	nulls[0] = ' ';
+	GetUserIdAndSecContext(&saved_userid, &saved_sec_context);
+	new_sec_context = saved_sec_context | SECURITY_LOCAL_USERID_CHANGE;
+	SetUserIdAndSecContext(log_owner, new_sec_context);
 
-	ret = SPI_execute_with_args(
-		"INSERT INTO ddl_guard.sentinel_log (operation) VALUES ($1)",
-		1, argtypes, values, nulls, false, 0);
-	if (ret != SPI_OK_INSERT)
-		ereport(ERROR,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("could not insert ddl_guard sentinel log entry")));
-
-	if (SPI_finish() != SPI_OK_FINISH)
-		ereport(ERROR,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("could not close SPI connection")));
-}
-
-static bool
-set_lobject_func_oids()
-{
-	const FmgrBuiltin *entry;
-	int			i;
-
-	lobject_func_oids = (Oid *) malloc(lobject_funcs_count * sizeof(Oid));
-	if (lobject_func_oids == NULL)
+	PG_TRY();
 	{
-		return false;
-	}
+		const char *op = (const char *) operation;
 
-	for (i = 0; i < lobject_funcs_count; i++)
+		if (op == NULL || op[0] == '\0')
+			op = "unknown";
+
+		if (SPI_connect() != SPI_OK_CONNECT)
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("could not connect to SPI")));
+		connected = true;
+
+		argtypes[0] = TEXTOID;
+		values[0] = CStringGetTextDatum(op);
+		nulls[0] = ' ';
+
+		ret = SPI_execute_with_args(
+			"INSERT INTO ddl_guard.sentinel_log (operation) VALUES ($1)",
+			1, argtypes, values, nulls, false, 0);
+		if (ret != SPI_OK_INSERT)
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("could not insert ddl_guard sentinel log entry")));
+
+		ret = SPI_finish();
+		if (ret != SPI_OK_FINISH)
+			ereport(ERROR,
+					(errcode(ERRCODE_INTERNAL_ERROR),
+					 errmsg("could not close SPI connection")));
+		connected = false;
+	}
+	PG_CATCH();
 	{
-		if ((entry = fmgr_lookupByName(large_object_funcs[i])) != NULL)
-		{
-			lobject_func_oids[i] = entry->foid;
-			if (entry->foid < min_reserved_oid)
-			{
-				min_reserved_oid = entry->foid;
-			}
-			else if (entry->foid > max_reserved_oid)
-			{
-				max_reserved_oid = entry->foid;
-			}
-		}
+		if (connected)
+			(void) SPI_finish();
+		SetUserIdAndSecContext(saved_userid, saved_sec_context);
+		PG_RE_THROW();
 	}
+	PG_END_TRY();
 
-	return true;
+	SetUserIdAndSecContext(saved_userid, saved_sec_context);
 }
 
 static void
 lob_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId, int subId, void *arg)
 {
-	int			i;
-	const FmgrBuiltin *entry;
+	const char *log_name;
 
-	if (ddl_guard_enabled && !superuser())
+	if (ddl_guard_enabled && ddl_guard_lo_sentinel)
 	{
-		if (ddl_guard_lo_sentinel)
+		if (!lobject_funcs_initialized && IsTransactionState())
 		{
-			switch (access)
-			{
-				case OAT_FUNCTION_EXECUTE:
-					/* look up the func and log that shit */
-					if (objectId >= min_reserved_oid && objectId <= max_reserved_oid)
-					{
-						for (i = 0; i < lobject_funcs_count; i++)
-						{
-							if (lobject_func_oids[i] == objectId)
-							{
-								/* ooh that's a bingo! */
-								if ((entry = fmgr_lookupByName(large_object_funcs[i])) != NULL)
-								{
-									log_sentinel_event(entry->funcName);
-									ereport(WARNING, errmsg("lo_guard: lobject \"%s\" function call, sentinel entry written", entry->funcName));
-								}
-							}
-						}
-					}
-				default:
+			lobject_funcs_ready = set_lobject_funcs();
+			lobject_funcs_initialized = true;
+		}
+		if (!lobject_funcs_ready)
+			goto done;
+
+		switch (access)
+		{
+			case OAT_FUNCTION_EXECUTE:
+				/* log large object function calls in sentinel mode */
+				if (classId != ProcedureRelationId)
 					break;
-			}
+
+				log_name = lookup_lobject_log_name(objectId);
+				if (log_name != NULL)
+				{
+					log_sentinel_event(log_name);
+					ereport(WARNING, errmsg("lo_guard: lobject \"%s\" function call, sentinel entry written", log_name));
+				}
+				break;
+			default:
+				break;
 		}
 	}
+done:
 	if (next_object_access_hook)
 		(*next_object_access_hook) (access, classId, objectId, subId, arg);
 }
@@ -181,7 +301,7 @@ ddl_guard_check(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_INTERNAL_ERROR),
 				 errmsg("ddl_guard_check: not fired by event trigger manager")));
 
-	if (ddl_guard_enabled && !superuser())
+	if (ddl_guard_enabled)
 	{
 		if (ddl_guard_ddl_sentinel)
 		{
@@ -191,11 +311,12 @@ ddl_guard_check(PG_FUNCTION_ARGS)
 			ereport(WARNING, (errmsg("ddl_guard: ddl detected, sentinel entry written")));
 			PG_RETURN_VOID();
 		}
-		ereport(ERROR,
-				(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-				 errmsg("Non-superusers are not allowed to execute DDL statements"),
-				 errhint("ddl_guard.enabled is set.")));
-	};
+		if (!superuser())
+			ereport(ERROR,
+					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+					 errmsg("Non-superusers are not allowed to execute DDL statements"),
+					 errhint("ddl_guard.enabled is set.")));
+	}
 
 	PG_RETURN_VOID();
 }
@@ -215,15 +336,8 @@ _PG_init(void)
 							 NULL, &ddl_guard_lo_sentinel, false, PGC_SUSET, 0, NULL,
 							 NULL, NULL);
 
-	if (set_lobject_func_oids())
-	{
-		next_object_access_hook = object_access_hook;
-		object_access_hook = lob_object_access_hook;
-	}
-	else
-	{
-		ereport(ERROR, errmsg("We beefed it, chief."));
-	}
+	next_object_access_hook = object_access_hook;
+	object_access_hook = lob_object_access_hook;
 
 	EmitWarningsOnPlaceholders("ddl_guard");
 }
@@ -231,9 +345,21 @@ _PG_init(void)
 void
 _PG_fini(void)
 {
-	if (lobject_func_oids != NULL)
+	int			i;
+
+	if (lobject_funcs != NULL)
 	{
-		free(lobject_func_oids);
+		for (i = 0; i < lobject_funcs_count; i++)
+		{
+			if (lobject_funcs[i].log_name != NULL)
+				pfree(lobject_funcs[i].log_name);
+		}
+		pfree(lobject_funcs);
+		lobject_funcs = NULL;
+		lobject_funcs_count = 0;
+		lobject_funcs_cap = 0;
+		lobject_funcs_initialized = false;
+		lobject_funcs_ready = false;
 	}
 
 	object_access_hook = next_object_access_hook;
