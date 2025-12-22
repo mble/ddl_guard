@@ -1,7 +1,7 @@
 SELECT count(*) AS before_count FROM ddl_guard.sentinel_log;
  before_count 
 --------------
-          145
+          149
 (1 row)
 
 \gset

@@ -85,12 +85,19 @@ WARNING:  lo_guard: lobject "be_lo_create" function call, sentinel entry written
 (1 row)
 ```
 
+Sentinel logging for data control statements (role and membership changes that do not fire event triggers) can be enabled with `ddl_guard.dcl_sentinel`.
+
+```sql
+ALTER SYSTEM SET ddl_guard.dcl_sentinel = on;
+```
+
 ## Configuration
 
 The following configuration options are available:
 
 - `ddl_guard.enabled`: Enables or disables the extension. Default is `off`.
 - `ddl_guard.ddl_sentinel`: Enables "sentinel mode" for DDL. Default is `off`.
+- `ddl_guard.dcl_sentinel`: Enables "sentinel mode" for data control statements. Default is `off`.
 - `ddl_guard.lo_sentinel`: Enables "sentinel mode" for large objects. Default is `off`.
 
 ## License

@@ -1,0 +1,14 @@
+SET ddl_guard.dcl_sentinel = off;
+DROP ROLE IF EXISTS ddl_guard_dcl_role;
+DROP ROLE IF EXISTS ddl_guard_dcl_member;
+SET ddl_guard.dcl_sentinel = on;
+CREATE ROLE ddl_guard_dcl_role;
+CREATE ROLE ddl_guard_dcl_member;
+GRANT ddl_guard_dcl_role TO ddl_guard_dcl_member;
+REVOKE ddl_guard_dcl_role FROM ddl_guard_dcl_member;
+SET ddl_guard.dcl_sentinel = off;
+SET ROLE ddl_guard_dcl_member;
+GRANT ddl_guard_dcl_role TO ddl_guard_dcl_member;
+RESET ROLE;
+DROP ROLE ddl_guard_dcl_member;
+DROP ROLE ddl_guard_dcl_role;
