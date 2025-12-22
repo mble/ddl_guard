@@ -36,9 +36,11 @@ shared_preload_libraries = 'ddl_guard'
 Then restart your PostgreSQL server.
 
 ```sql
-CREATE EXTENSION ddl_guard SCHEMA pg_catalog;
+CREATE EXTENSION ddl_guard;
 ALTER SYSTEM SET ddl_guard.enabled = on;
 ```
+
+Note: `ddl_guard` creates the `ddl_guard` schema; ensure it does not already exist before running `CREATE EXTENSION`.
 
 Now, only superusers can run DDL commands.
 
@@ -52,31 +54,31 @@ For a full list of DDL commands that are blocked, see `ddl_command_start` in htt
 
 ## Sentinel Mode
 
-In some cases, instead of blocking DDL, dropping a sentinel file to indicate DDL has been ran is enough. This can be enabled by setting `ddl_guard.ddl_sentinel` to `on`.
+In some cases, instead of blocking DDL, writing a sentinel entry to an internal log table is enough. This can be enabled by setting `ddl_guard.ddl_sentinel` to `on`.
 
 ```sql
 ALTER SYSTEM SET ddl_guard.ddl_sentinel = on;
 ```
 
-Now, instead of blocking, a warning is emitted and a sentinel file is dropped as `$PGDATA/pg_stat_tmp/ddl_guard_ddl_sentinel`:
+Now, instead of blocking, a warning is emitted and a sentinel entry is written to `ddl_guard.sentinel_log` with `logged_at` and `operation`:
 
 ```sql
 CREATE TABLE foo (id serial);
-WARNING:  ddl_guard: ddl detected, sentinel file written
+WARNING:  ddl_guard: ddl detected, sentinel entry written
 CREATE TABLE
 ```
 
-This can also be used in conjunction with `ddl_guard.lo_sentinel` to drop a sentinel file for large objects.
+This can also be used in conjunction with `ddl_guard.lo_sentinel` to log large object operations.
 
 ```sql
 ALTER SYSTEM SET ddl_guard.lo_sentinel = on;
 ```
 
-Now, instead of blocking, a warning is emitted and a sentinel file is dropped as `$PGDATA/pg_stat_tmp/ddl_guard_lo_sentinel`:
+Now, instead of blocking, a warning is emitted and a sentinel entry is written to `ddl_guard.sentinel_log` (readable by all users):
 
 ```sql
 SELECT lo_create(0);
-WARNING:  lo_guard: lobject "be_lo_create" function call, sentinel file written
+WARNING:  lo_guard: lobject "be_lo_create" function call, sentinel entry written
  lo_create
 -----------
      51058

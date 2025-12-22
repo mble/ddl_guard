@@ -1,0 +1,25 @@
+SELECT count(*) AS before_count FROM ddl_guard.sentinel_log;
+ before_count 
+--------------
+          145
+(1 row)
+
+\gset
+CREATE TABLE ddl_guard_sentinel_test (id int);
+WARNING:  ddl_guard: ddl detected, sentinel entry written
+INSERT INTO ddl_guard.sentinel_log (operation) VALUES ('spoof');
+ERROR:  permission denied for table sentinel_log
+SELECT count(*) >= :before_count::int + 1 AS logged_after_create FROM ddl_guard.sentinel_log;
+ logged_after_create 
+---------------------
+ t
+(1 row)
+
+DROP TABLE ddl_guard_sentinel_test;
+WARNING:  ddl_guard: ddl detected, sentinel entry written
+SELECT count(*) >= :before_count::int + 2 AS logged_after_drop FROM ddl_guard.sentinel_log;
+ logged_after_drop 
+-------------------
+ t
+(1 row)
+
