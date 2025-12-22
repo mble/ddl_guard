@@ -1,0 +1,8 @@
+CREATE TABLE ddl_guard_dcl_test (id int);
+WARNING:  ddl_guard: ddl detected, sentinel entry written
+GRANT SELECT ON ddl_guard_dcl_test TO PUBLIC;
+WARNING:  ddl_guard: ddl detected, sentinel entry written
+REVOKE SELECT ON ddl_guard_dcl_test FROM PUBLIC;
+WARNING:  ddl_guard: ddl detected, sentinel entry written
+DROP TABLE ddl_guard_dcl_test;
+WARNING:  ddl_guard: ddl detected, sentinel entry written
