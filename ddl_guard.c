@@ -32,7 +32,7 @@ Datum		ddl_guard_check(PG_FUNCTION_ARGS);
 static void lob_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId, int subId, void *arg);
 static bool set_lobject_funcs(void);
 static const char *lookup_lobject_log_name(Oid funcid);
-static Oid get_sentinel_log_owner(void);
+static Oid	get_sentinel_log_owner(void);
 static void ddl_guard_process_utility(PlannedStmt *pstmt, const char *queryString, bool readOnlyTree,
 									  ProcessUtilityContext context, ParamListInfo params,
 									  QueryEnvironment *queryEnv, DestReceiver *dest, QueryCompletion *qc);
@@ -76,7 +76,7 @@ static void
 add_lobject_func(Oid funcid, const char *log_name)
 {
 	int			i;
-	MemoryContext	oldcxt;
+	MemoryContext oldcxt;
 
 	for (i = 0; i < lobject_funcs_count; i++)
 	{
@@ -248,7 +248,7 @@ log_sentinel_event(const char *volatile operation)
 	Oid			saved_userid;
 	int			saved_sec_context;
 	int			new_sec_context;
-	volatile bool	connected = false;
+	volatile bool connected = false;
 
 	log_owner = get_sentinel_log_owner();
 	if (!OidIsValid(log_owner))
@@ -278,8 +278,8 @@ log_sentinel_event(const char *volatile operation)
 		nulls[0] = ' ';
 
 		ret = SPI_execute_with_args(
-			"INSERT INTO ddl_guard.sentinel_log (operation) VALUES ($1)",
-			1, argtypes, values, nulls, false, 0);
+									"INSERT INTO ddl_guard.sentinel_log (operation) VALUES ($1)",
+									1, argtypes, values, nulls, false, 0);
 		if (ret != SPI_OK_INSERT)
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
