@@ -33,9 +33,15 @@ static void lob_object_access_hook(ObjectAccessType access, Oid classId, Oid obj
 static bool set_lobject_funcs(void);
 static const char *lookup_lobject_log_name(Oid funcid);
 static Oid	get_sentinel_log_owner(void);
+#if PG_VERSION_NUM >= 140000
 static void ddl_guard_process_utility(PlannedStmt *pstmt, const char *queryString, bool readOnlyTree,
 									  ProcessUtilityContext context, ParamListInfo params,
 									  QueryEnvironment *queryEnv, DestReceiver *dest, QueryCompletion *qc);
+#else
+static void ddl_guard_process_utility(PlannedStmt *pstmt, const char *queryString,
+									  ProcessUtilityContext context, ParamListInfo params,
+									  QueryEnvironment *queryEnv, DestReceiver *dest, QueryCompletion *qc);
+#endif
 static bool is_guarded_dcl_statement(Node *parsetree, CommandTag *commandTag);
 
 static bool ddl_guard_enabled = false;
@@ -344,9 +350,15 @@ done:
 }
 
 static void
+#if PG_VERSION_NUM >= 140000
 ddl_guard_process_utility(PlannedStmt *pstmt, const char *queryString, bool readOnlyTree,
 						  ProcessUtilityContext context, ParamListInfo params,
 						  QueryEnvironment *queryEnv, DestReceiver *dest, QueryCompletion *qc)
+#else
+ddl_guard_process_utility(PlannedStmt *pstmt, const char *queryString,
+						  ProcessUtilityContext context, ParamListInfo params,
+						  QueryEnvironment *queryEnv, DestReceiver *dest, QueryCompletion *qc)
+#endif
 {
 	CommandTag	commandTag;
 
@@ -365,11 +377,25 @@ ddl_guard_process_utility(PlannedStmt *pstmt, const char *queryString, bool read
 	}
 
 	if (next_process_utility_hook)
+	{
+#if PG_VERSION_NUM >= 140000
 		(*next_process_utility_hook) (pstmt, queryString, readOnlyTree,
 									  context, params, queryEnv, dest, qc);
+#else
+		(*next_process_utility_hook) (pstmt, queryString,
+									  context, params, queryEnv, dest, qc);
+#endif
+	}
 	else
+	{
+#if PG_VERSION_NUM >= 140000
 		standard_ProcessUtility(pstmt, queryString, readOnlyTree,
 								context, params, queryEnv, dest, qc);
+#else
+		standard_ProcessUtility(pstmt, queryString,
+								context, params, queryEnv, dest, qc);
+#endif
+	}
 }
 
 Datum
