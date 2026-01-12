@@ -27,7 +27,7 @@ PG_MODULE_MAGIC;
 
 void		_PG_init(void);
 void		_PG_fini(void);
-void		log_sentinel_event(const char *volatile operation);
+bool		log_sentinel_event(const char *volatile operation);
 Datum		ddl_guard_check(PG_FUNCTION_ARGS);
 static void lob_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId, int subId, void *arg);
 static bool set_lobject_funcs(void);
@@ -43,6 +43,7 @@ static void ddl_guard_process_utility(PlannedStmt *pstmt, const char *queryStrin
 									  QueryEnvironment *queryEnv, DestReceiver *dest, QueryCompletion *qc);
 #endif
 static bool is_guarded_dcl_statement(Node *parsetree, CommandTag *commandTag);
+static bool is_guarded_ddl_statement(Node *parsetree, CommandTag *commandTag);
 
 static bool ddl_guard_enabled = false;
 static bool ddl_guard_ddl_sentinel = false;
@@ -178,6 +179,22 @@ lookup_lobject_log_name(Oid funcid)
 }
 
 static bool
+is_guarded_ddl_statement(Node *parsetree, CommandTag *commandTag)
+{
+	CommandTag	tag;
+
+	if (parsetree == NULL)
+		return false;
+
+	tag = CreateCommandTag(parsetree);
+	if (!command_tag_event_trigger_ok(tag))
+		return false;
+	if (commandTag != NULL)
+		*commandTag = tag;
+	return true;
+}
+
+static bool
 is_guarded_dcl_statement(Node *parsetree, CommandTag *commandTag)
 {
 	CommandTag	tag;
@@ -197,7 +214,7 @@ is_guarded_dcl_statement(Node *parsetree, CommandTag *commandTag)
 		case T_GrantStmt:
 		case T_AlterDefaultPrivilegesStmt:
 			tag = CreateCommandTag(parsetree);
-			/* Event-triggered commands are handled by ddl_guard_check. */
+			/* Event-triggered commands are handled by the ProcessUtility hook. */
 			if (command_tag_event_trigger_ok(tag))
 				return false;
 			if (commandTag != NULL)
@@ -243,7 +260,7 @@ get_sentinel_log_owner(void)
 	return relowner;
 }
 
-void
+bool
 log_sentinel_event(const char *volatile operation)
 {
 	int			ret;
@@ -258,9 +275,7 @@ log_sentinel_event(const char *volatile operation)
 
 	log_owner = get_sentinel_log_owner();
 	if (!OidIsValid(log_owner))
-		ereport(ERROR,
-				(errcode(ERRCODE_INTERNAL_ERROR),
-				 errmsg("ddl_guard.sentinel_log not found")));
+		return false;
 
 	GetUserIdAndSecContext(&saved_userid, &saved_sec_context);
 	new_sec_context = saved_sec_context | SECURITY_LOCAL_USERID_CHANGE;
@@ -308,6 +323,7 @@ log_sentinel_event(const char *volatile operation)
 	PG_END_TRY();
 
 	SetUserIdAndSecContext(saved_userid, saved_sec_context);
+	return true;
 }
 
 static void
@@ -336,8 +352,10 @@ lob_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId, int s
 				log_name = lookup_lobject_log_name(objectId);
 				if (log_name != NULL)
 				{
-					log_sentinel_event(log_name);
-					ereport(WARNING, errmsg("lo_guard: lobject \"%s\" function call, sentinel entry written", log_name));
+					if (log_sentinel_event(log_name))
+						ereport(WARNING, errmsg("lo_guard: lobject \"%s\" function call, sentinel entry written", log_name));
+					else
+						ereport(WARNING, errmsg("lo_guard: lobject \"%s\" function call, sentinel log unavailable", log_name));
 				}
 				break;
 			default:
@@ -361,13 +379,34 @@ ddl_guard_process_utility(PlannedStmt *pstmt, const char *queryString,
 #endif
 {
 	CommandTag	commandTag;
+	bool		guard_context;
 
-	if (ddl_guard_enabled && is_guarded_dcl_statement(pstmt->utilityStmt, &commandTag))
+	/* Skip internal subcommands to avoid duplicate sentinel entries. */
+	guard_context = (context != PROCESS_UTILITY_SUBCOMMAND);
+
+	if (guard_context && ddl_guard_enabled && is_guarded_ddl_statement(pstmt->utilityStmt, &commandTag))
+	{
+		if (ddl_guard_ddl_sentinel)
+		{
+			if (log_sentinel_event(GetCommandTagName(commandTag)))
+				ereport(WARNING, (errmsg("ddl_guard: ddl detected, sentinel entry written")));
+			else
+				ereport(WARNING, (errmsg("ddl_guard: ddl detected, sentinel log unavailable")));
+		}
+		else if (!superuser())
+			ereport(ERROR,
+					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+					 errmsg("Non-superusers are not allowed to execute DDL statements"),
+					 errhint("ddl_guard.enabled is set.")));
+	}
+	else if (guard_context && ddl_guard_enabled && is_guarded_dcl_statement(pstmt->utilityStmt, &commandTag))
 	{
 		if (ddl_guard_dcl_sentinel)
 		{
-			log_sentinel_event(GetCommandTagName(commandTag));
-			ereport(WARNING, (errmsg("ddl_guard: dcl detected, sentinel entry written")));
+			if (log_sentinel_event(GetCommandTagName(commandTag)))
+				ereport(WARNING, (errmsg("ddl_guard: dcl detected, sentinel entry written")));
+			else
+				ereport(WARNING, (errmsg("ddl_guard: dcl detected, sentinel log unavailable")));
 		}
 		else if (!superuser())
 			ereport(ERROR,
@@ -405,23 +444,6 @@ ddl_guard_check(PG_FUNCTION_ARGS)
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
 				 errmsg("ddl_guard_check: not fired by event trigger manager")));
-
-	if (ddl_guard_enabled)
-	{
-		if (ddl_guard_ddl_sentinel)
-		{
-			EventTriggerData *trigdata = (EventTriggerData *) fcinfo->context;
-
-			log_sentinel_event(GetCommandTagName(trigdata->tag));
-			ereport(WARNING, (errmsg("ddl_guard: ddl detected, sentinel entry written")));
-			PG_RETURN_VOID();
-		}
-		if (!superuser())
-			ereport(ERROR,
-					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-					 errmsg("Non-superusers are not allowed to execute DDL statements"),
-					 errhint("ddl_guard.enabled is set.")));
-	}
 
 	PG_RETURN_VOID();
 }

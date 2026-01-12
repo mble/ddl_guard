@@ -1,10 +1,4 @@
-SELECT count(*) AS before_count FROM ddl_guard.sentinel_log;
- before_count 
---------------
-          149
-(1 row)
-
-\gset
+SELECT count(*) AS before_count FROM ddl_guard.sentinel_log \gset
 CREATE TABLE ddl_guard_sentinel_test (id int);
 WARNING:  ddl_guard: ddl detected, sentinel entry written
 INSERT INTO ddl_guard.sentinel_log (operation) VALUES ('spoof');
