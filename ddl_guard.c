@@ -16,6 +16,8 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
+#include "nodes/parsenodes.h"
+#include "tcop/cmdtag.h"
 #include "tcop/utility.h"
 
 
@@ -30,12 +32,18 @@ Datum		ddl_guard_check(PG_FUNCTION_ARGS);
 static void lob_object_access_hook(ObjectAccessType access, Oid classId, Oid objectId, int subId, void *arg);
 static bool set_lobject_funcs(void);
 static const char *lookup_lobject_log_name(Oid funcid);
-static Oid get_sentinel_log_owner(void);
+static Oid	get_sentinel_log_owner(void);
+static void ddl_guard_process_utility(PlannedStmt *pstmt, const char *queryString, bool readOnlyTree,
+									  ProcessUtilityContext context, ParamListInfo params,
+									  QueryEnvironment *queryEnv, DestReceiver *dest, QueryCompletion *qc);
+static bool is_guarded_dcl_statement(Node *parsetree, CommandTag *commandTag);
 
 static bool ddl_guard_enabled = false;
 static bool ddl_guard_ddl_sentinel = false;
+static bool ddl_guard_dcl_sentinel = false;
 static bool ddl_guard_lo_sentinel = false;
 static object_access_hook_type next_object_access_hook = NULL;
+static ProcessUtility_hook_type next_process_utility_hook = NULL;
 static bool lobject_funcs_initialized = false;
 static bool lobject_funcs_ready = false;
 
@@ -68,7 +76,7 @@ static void
 add_lobject_func(Oid funcid, const char *log_name)
 {
 	int			i;
-	MemoryContext	oldcxt;
+	MemoryContext oldcxt;
 
 	for (i = 0; i < lobject_funcs_count; i++)
 	{
@@ -163,6 +171,37 @@ lookup_lobject_log_name(Oid funcid)
 	return NULL;
 }
 
+static bool
+is_guarded_dcl_statement(Node *parsetree, CommandTag *commandTag)
+{
+	CommandTag	tag;
+
+	if (parsetree == NULL)
+		return false;
+
+	switch (nodeTag(parsetree))
+	{
+		case T_CreateRoleStmt:
+		case T_AlterRoleStmt:
+		case T_AlterRoleSetStmt:
+		case T_DropRoleStmt:
+		case T_GrantRoleStmt:
+		case T_ReassignOwnedStmt:
+		case T_DropOwnedStmt:
+		case T_GrantStmt:
+		case T_AlterDefaultPrivilegesStmt:
+			tag = CreateCommandTag(parsetree);
+			/* Event-triggered commands are handled by ddl_guard_check. */
+			if (command_tag_event_trigger_ok(tag))
+				return false;
+			if (commandTag != NULL)
+				*commandTag = tag;
+			return true;
+		default:
+			return false;
+	}
+}
+
 static Oid
 get_sentinel_log_owner(void)
 {
@@ -209,7 +248,7 @@ log_sentinel_event(const char *volatile operation)
 	Oid			saved_userid;
 	int			saved_sec_context;
 	int			new_sec_context;
-	volatile bool	connected = false;
+	volatile bool connected = false;
 
 	log_owner = get_sentinel_log_owner();
 	if (!OidIsValid(log_owner))
@@ -239,8 +278,8 @@ log_sentinel_event(const char *volatile operation)
 		nulls[0] = ' ';
 
 		ret = SPI_execute_with_args(
-			"INSERT INTO ddl_guard.sentinel_log (operation) VALUES ($1)",
-			1, argtypes, values, nulls, false, 0);
+									"INSERT INTO ddl_guard.sentinel_log (operation) VALUES ($1)",
+									1, argtypes, values, nulls, false, 0);
 		if (ret != SPI_OK_INSERT)
 			ereport(ERROR,
 					(errcode(ERRCODE_INTERNAL_ERROR),
@@ -304,6 +343,35 @@ done:
 		(*next_object_access_hook) (access, classId, objectId, subId, arg);
 }
 
+static void
+ddl_guard_process_utility(PlannedStmt *pstmt, const char *queryString, bool readOnlyTree,
+						  ProcessUtilityContext context, ParamListInfo params,
+						  QueryEnvironment *queryEnv, DestReceiver *dest, QueryCompletion *qc)
+{
+	CommandTag	commandTag;
+
+	if (ddl_guard_enabled && is_guarded_dcl_statement(pstmt->utilityStmt, &commandTag))
+	{
+		if (ddl_guard_dcl_sentinel)
+		{
+			log_sentinel_event(GetCommandTagName(commandTag));
+			ereport(WARNING, (errmsg("ddl_guard: dcl detected, sentinel entry written")));
+		}
+		else if (!superuser())
+			ereport(ERROR,
+					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+					 errmsg("Non-superusers are not allowed to execute data control statements"),
+					 errhint("ddl_guard.enabled is set.")));
+	}
+
+	if (next_process_utility_hook)
+		(*next_process_utility_hook) (pstmt, queryString, readOnlyTree,
+									  context, params, queryEnv, dest, qc);
+	else
+		standard_ProcessUtility(pstmt, queryString, readOnlyTree,
+								context, params, queryEnv, dest, qc);
+}
+
 Datum
 ddl_guard_check(PG_FUNCTION_ARGS)
 {
@@ -343,12 +411,18 @@ _PG_init(void)
 							 NULL, &ddl_guard_ddl_sentinel, false, PGC_SUSET, 0, NULL,
 							 NULL, NULL);
 
+	DefineCustomBoolVariable("ddl_guard.dcl_sentinel", "Write sentinel entry for data control statements",
+							 NULL, &ddl_guard_dcl_sentinel, false, PGC_SUSET, 0, NULL,
+							 NULL, NULL);
+
 	DefineCustomBoolVariable("ddl_guard.lo_sentinel", "Write sentinel entry for pg_largeobject modifications",
 							 NULL, &ddl_guard_lo_sentinel, false, PGC_SUSET, 0, NULL,
 							 NULL, NULL);
 
 	next_object_access_hook = object_access_hook;
 	object_access_hook = lob_object_access_hook;
+	next_process_utility_hook = ProcessUtility_hook;
+	ProcessUtility_hook = ddl_guard_process_utility;
 
 	EmitWarningsOnPlaceholders("ddl_guard");
 }
@@ -374,4 +448,5 @@ _PG_fini(void)
 	}
 
 	object_access_hook = next_object_access_hook;
+	ProcessUtility_hook = next_process_utility_hook;
 }

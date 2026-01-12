@@ -1,0 +1,22 @@
+SET ddl_guard.dcl_sentinel = off;
+DROP ROLE IF EXISTS ddl_guard_dcl_role;
+NOTICE:  role "ddl_guard_dcl_role" does not exist, skipping
+DROP ROLE IF EXISTS ddl_guard_dcl_member;
+NOTICE:  role "ddl_guard_dcl_member" does not exist, skipping
+SET ddl_guard.dcl_sentinel = on;
+CREATE ROLE ddl_guard_dcl_role;
+WARNING:  ddl_guard: dcl detected, sentinel entry written
+CREATE ROLE ddl_guard_dcl_member;
+WARNING:  ddl_guard: dcl detected, sentinel entry written
+GRANT ddl_guard_dcl_role TO ddl_guard_dcl_member;
+WARNING:  ddl_guard: dcl detected, sentinel entry written
+REVOKE ddl_guard_dcl_role FROM ddl_guard_dcl_member;
+WARNING:  ddl_guard: dcl detected, sentinel entry written
+SET ddl_guard.dcl_sentinel = off;
+SET ROLE ddl_guard_dcl_member;
+GRANT ddl_guard_dcl_role TO ddl_guard_dcl_member;
+ERROR:  Non-superusers are not allowed to execute data control statements
+HINT:  ddl_guard.enabled is set.
+RESET ROLE;
+DROP ROLE ddl_guard_dcl_member;
+DROP ROLE ddl_guard_dcl_role;
