@@ -40,6 +40,12 @@ CREATE EXTENSION ddl_guard;
 ALTER SYSTEM SET ddl_guard.enabled = on;
 ```
 
+As of 1.0.2, DDL enforcement runs in the ProcessUtility hook and no event trigger is created. If you're upgrading from earlier versions, run:
+
+```sql
+ALTER EXTENSION ddl_guard UPDATE TO '1.0.2';
+```
+
 Note: `ddl_guard` creates the `ddl_guard` schema; ensure it does not already exist before running `CREATE EXTENSION`.
 
 Now, only superusers can run DDL commands.
