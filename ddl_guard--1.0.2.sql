@@ -6,10 +6,3 @@ CREATE TABLE ddl_guard.sentinel_log (
 );
 GRANT USAGE ON SCHEMA ddl_guard TO PUBLIC;
 GRANT SELECT ON ddl_guard.sentinel_log TO PUBLIC;
-
-CREATE OR REPLACE FUNCTION ddl_guard_check()
-    RETURNS event_trigger
-    SECURITY INVOKER
-    SET search_path = 'pg_catalog, pg_temp'
-    LANGUAGE C
-    AS 'MODULE_PATHNAME', 'ddl_guard_check';
